@@ -55,7 +55,6 @@ bootstrap_results <- bootstrap_samples %>%
 Plot Distributions
 
 ```{r}
-# Plot distribution of r-squared
 ggplot(bootstrap_results, aes(x = r_squared)) +
   geom_histogram(binwidth = 0.01, fill = "blue", alpha = 0.7) +
   labs(
@@ -64,7 +63,6 @@ ggplot(bootstrap_results, aes(x = r_squared)) +
     y = "Frequency"
   )
 
-# Plot distribution of log(beta_0 * beta_1)
 ggplot(bootstrap_results, aes(x = log_beta_product)) +
   geom_histogram(binwidth = 0.02, fill = "green", alpha = 0.7) +
   labs(
@@ -86,4 +84,107 @@ conf_intervals <- bootstrap_results %>%
 print(conf_intervals)
 
 ```
+
+# Problem 2
+```{r}
+homicide_data = read.csv("./data/homicide-data.csv")
+```
+
+```{r}
+library(tidyverse)
+library(broom)
+library(purrr)
+library(dplyr)
+
+url <- "https://raw.githubusercontent.com/washingtonpost/data-homicides/master/homicide-data.csv"
+homicides <- read_csv(url)
+
+homicides <- homicides %>%
+  mutate(victim_age = as.numeric(victim_age)) %>%
+  filter(!(city == "Dallas" & state == "TX"),
+         !(city == "Phoenix" & state == "AZ"),
+         !(city == "Kansas City" & state == "MO"),
+         !(city == "Tulsa" & state == "AL")) %>%
+  filter(victim_race %in% c("White", "Black")) %>%
+  filter(!is.na(victim_age)) %>%
+  mutate(city_state = paste(city, state, sep = ", "),
+         solved_binary = ifelse(disposition == "Closed by arrest", 1, 0))
+
+print(homicides)
+```
+
+Logistic regression for Baltimore, MD
+```{r}
+baltimore <- homicides %>%
+  filter(city_state == "Baltimore, MD")
+
+baltimore_model <- glm(
+  solved_binary ~ victim_age + victim_sex + victim_race,
+  family = "binomial",
+  data = baltimore
+)
+baltimore_results <- broom::tidy(baltimore_model, conf.int = TRUE) %>%
+  filter(term == "victim_sexMale") %>%
+  mutate(
+    adj_odds_ratio = exp(estimate),
+    conf.low = exp(conf.low),
+    conf.high = exp(conf.high)
+  )
+
+print(baltimore_results)
+```
+
+Logistic regression for all cities
+```{r}
+city_results <- homicides %>%
+  group_by(city_state) %>%
+  nest() %>%
+  mutate(
+    model = map(data, ~ glm(
+      solved_binary ~ victim_age + victim_sex + victim_race,
+      family = "binomial",
+      data = .
+    )),
+    results = map(model, ~ broom::tidy(., conf.int = TRUE) %>%
+      filter(term == "victim_sexMale") %>%
+      mutate(
+        adj_odds_ratio = exp(estimate),
+        conf.low = exp(conf.low),
+        conf.high = exp(conf.high)
+      ))
+  ) %>%
+  unnest(results)
+
+city_results %>%
+  ggplot(aes(x = reorder(city_state, adj_odds_ratio), y = adj_odds_ratio)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2) +
+  coord_flip() +
+  labs(
+    title = "Adjusted Odds Ratios for Solving Homicides",
+    x = "City",
+    y = "Adjusted Odds Ratio (Male vs Female)"
+  ) +
+  theme_minimal()
+```
+The plot visualizes the adjusted odds ratios (ORs) for solving homicides involving male versus female victims across various U.S. cities. The horizontal line segments indicate the 95% confidence interval for the OR. 
+
+#### Trend in Odds Ratios:
+
+**Majority Below 1**: Most cities exhibit ORs below 1, suggesting that homicides involving male victims are generally less likely to be solved compared to those involving female victims.
+
+**Variation Across Cities**: However, there is considerable variation in the magnitude of these differences across cities. Some cities, like Baltimore, show a pronounced difference, while others, like New York, have a more modest difference.
+
+#### Confidence Intervals:
+
+**Width and Precision**: The width of the confidence intervals varies across cities. Narrower intervals, like those for Baltimore, indicate more precise estimates. Wider intervals, such as those for Albuquerque and Stockton, suggest greater uncertainty in the OR estimate.
+
+**Statistical Significance**: If the confidence interval for a city does not include 1, it indicates a statistically significant difference in the odds of solving homicides between male and female victims.
+
+#### Potential Factors Influencing ORs:
+
+**Local Law Enforcement Practices**: Differences in investigative techniques, resource allocation, and prioritization of cases across police departments may influence the likelihood of solving homicides.
+Socioeconomic Factors: Factors like poverty, crime rates, and community engagement can impact the resources available for investigations and the cooperation of witnesses.
+
+**Victim Characteristics**: Beyond sex, factors like age, race, and socioeconomic status may also influence the likelihood of a homicide being solved.
 
