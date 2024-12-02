@@ -87,10 +87,6 @@ print(conf_intervals)
 
 # Problem 2
 ```{r}
-homicide_data = read.csv("./data/homicide-data.csv")
-```
-
-```{r}
 library(tidyverse)
 library(broom)
 library(purrr)
@@ -188,3 +184,90 @@ Socioeconomic Factors: Factors like poverty, crime rates, and community engageme
 
 **Victim Characteristics**: Beyond sex, factors like age, race, and socioeconomic status may also influence the likelihood of a homicide being solved.
 
+# Problem3 
+```{r}
+library(tidyverse)
+library(modelr)
+library(broom)
+library(crossval)
+library(purrr)
+
+birthweight <- read_csv("./data/birthweight.csv")
+birthweight <- birthweight %>%
+  mutate(
+    babysex = factor(babysex, labels = c("Male", "Female")),
+    malform = factor(malform, labels = c("Absent", "Present")),
+    frace = factor(frace),
+    mrace = factor(mrace)
+  ) %>%
+  drop_na()
+
+model_proposed <- lm(bwt ~ babysex + bhead + blength + delwt + gaweeks + wtgain, data = birthweight)
+
+birthweight <- birthweight %>%
+  add_predictions(model_proposed, var = "predicted") %>%
+  add_residuals(model_proposed, var = "residuals")
+
+residual_plot <- birthweight %>%
+  ggplot(aes(x = predicted, y = residuals)) +
+  geom_point() +
+  geom_smooth() +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+  labs(title = "Residuals vs Fitted Values", x = "Fitted Values", y = "Residuals") +
+  theme_minimal()
+
+print(residual_plot)
+```
+
+#### Modeling process
+
+The dataset was cleaned by converting categorical variables (`babysex`, `frace`, `mrace`, `malform`) into factors to allow appropriate statistical modeling. Missing data were dropped to ensure analysis integrity. The dependent variable, `bwt` (birth weight), remained numeric for regression analysis. 
+
+A multiple linear regression model was developed to predict birth weight using hypothesized influential factors: `bhead`, `blength`, `gaweeks`, `delwt`, and `wtgain`. These variables were chosen based on biological plausibility and domain knowledge about factors influencing fetal growth.
+
+Residuals and predicted values were computed using `add_predictions()` and `add_residuals()`. The residual plot revealed residuals scattered around zero, indicating no severe violations of linearity or heteroscedasticity. In addition, slight deviations were noted at extreme fitted values, may hint at potential model refinements.
+
+**Comparison models**
+```{r}
+# Model 1: Length at birth and gestational age (main effects only)
+comparison_model_1 <- lm(bwt ~ blength + gaweeks, data = birthweight)
+
+# Model 2: Head circumference, length, sex, and all interactions (including three-way)
+comparison_model_2 <- lm(bwt ~ bhead * blength * babysex, data = birthweight)
+```
+
+```{r}
+cv_df <- crossv_mc(birthweight, 100) |>
+  mutate(
+    train = map(train, as_tibble),
+    test = map(test, as_tibble)
+  )
+
+cv_res <- cv_df |>
+  mutate(
+    model_proposed = map(train, ~lm(bwt ~ babysex + bhead + blength + delwt + gaweeks + wtgain, data = .x)),
+    comparison_model_1 = map(train, ~lm(bwt ~ blength + gaweeks, data = .x)),
+    comparison_model_2 = map(train, ~lm(bwt ~ bhead * blength * babysex, data = .x)),
+    rmse_proposed = map2_dbl(model_proposed, test, ~rmse(.x, .y)),
+    rmse_model1 = map2_dbl(comparison_model_1, test, ~rmse(.x, .y)),
+    rmse_model2 = map2_dbl(comparison_model_2, test, ~rmse(.x, .y))
+  )
+
+cv_res |>
+  select(starts_with("rmse")) |>
+  pivot_longer(
+    everything(),
+    names_to = "model",
+    values_to = "rmse",
+    names_prefix = "rmse_"
+  ) |>
+  ggplot(aes(x = model, y = rmse)) +
+  geom_violin() +
+  labs(
+    title = "rmse comparison of models",
+    x = "model",
+    y = "rmse"
+  )
+```
+
+The violin plot visualizes the distribution of RMSE values for three different regression models across 100 cross-validation folds. The proposed model demonstrates the lowest RMSE values, indicating superior predictive performance compared to Model 1 (using only length at birth and gestational age) and Model 2 (using head circumference, length, sex, and all their interactions). This may suggest that the inclusion of additional relevant factors in the proposed model enhances its predictive accuracy for birthweight.
