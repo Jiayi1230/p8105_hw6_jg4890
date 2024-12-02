@@ -1,0 +1,89 @@
+---
+title: "p8105_hw6_jg4890"
+author: "Jiayi Ge"
+date: "2024-12-02"
+output: github_document
+---
+# Problem 1
+
+Load Libraries and Data
+```{r}
+library(tidyverse)
+library(broom)
+library(rsample)
+
+weather_df <- rnoaa::meteo_pull_monitors(
+  c("USW00094728"),
+  var = c("PRCP", "TMIN", "TMAX"),
+  date_min = "2017-01-01",
+  date_max = "2017-12-31"
+) %>%
+  mutate(
+    name = recode(id, USW00094728 = "CentralPark_NY"),
+    tmin = tmin / 10,
+    tmax = tmax / 10
+  ) %>%
+  select(name, id, everything())
+```
+
+Bootstrap Analysis
+```{r}
+set.seed(123)
+
+bootstrap_samples <- bootstraps(weather_df, times = 5000)
+
+bootstrap_metrics <- function(split) {
+
+  sample_data <- analysis(split)
+  
+  model <- lm(tmax ~ tmin, data = sample_data)
+  
+  r_squared <- glance(model)$r.squared
+  
+  coefs <- tidy(model) %>% pull(estimate)
+  
+  log_beta_product <- log(coefs[1] * coefs[2])
+  
+  return(tibble(r_squared = r_squared, log_beta_product = log_beta_product))
+}
+
+bootstrap_results <- bootstrap_samples %>%
+  mutate(metrics = map(splits, bootstrap_metrics)) %>%
+  unnest(metrics)
+```
+
+Plot Distributions
+
+```{r}
+# Plot distribution of r-squared
+ggplot(bootstrap_results, aes(x = r_squared)) +
+  geom_histogram(binwidth = 0.01, fill = "blue", alpha = 0.7) +
+  labs(
+    title = "Bootstrap Distribution of R-Squared",
+    x = "R-Squared",
+    y = "Frequency"
+  )
+
+# Plot distribution of log(beta_0 * beta_1)
+ggplot(bootstrap_results, aes(x = log_beta_product)) +
+  geom_histogram(binwidth = 0.02, fill = "green", alpha = 0.7) +
+  labs(
+    title = "Bootstrap Distribution of log(beta_0 * beta_1)",
+    x = "log(beta_0 * beta_1)",
+    y = "Frequency"
+  )
+```
+
+Confidence Intervals
+```{r}
+conf_intervals <- bootstrap_results %>%
+  summarize(
+    r_squared_lower = quantile(r_squared, 0.025),
+    r_squared_upper = quantile(r_squared, 0.975),
+    log_beta_product_lower = quantile(log_beta_product, 0.025),
+    log_beta_product_upper = quantile(log_beta_product, 0.975)
+  )
+print(conf_intervals)
+
+```
+
